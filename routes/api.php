@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\CustomEmailController;
 
 Route::group([], function () {
 
@@ -11,7 +12,7 @@ Route::group([], function () {
     Route::post('/password/verify-otp', [\App\Http\Controllers\Api\PasswordController::class, 'verifyOtp']);
     Route::post('/password/reset', [\App\Http\Controllers\Api\PasswordController::class, 'resetPassword']);
     // Route::middleware(['tenant', 'apitoken'])->group(function () {
-
+    Route::middleware('auth:api')->post('/send-email', [CustomEmailController::class, 'sendCustomEmail']);
     Route::middleware(['apitoken'])->group(function () {
         Route::post('/user/profile-picture', [\App\Http\Controllers\Api\UserController::class, 'updateProfilePicture']);
 

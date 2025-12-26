@@ -37,12 +37,33 @@
         </div>
       </div>
 
-      <div class="actions">
-        <button @click="editMode = !editMode" :class="['edit-btn', editMode ? 'cancelar' : '']">
+      <div class="actions-bar">
+        <button @click="editMode = !editMode" :class="['primary-btn', editMode ? 'cancelar' : '']">
           <i class="fa-solid" :class="editMode ? 'fa-xmark' : 'fa-pen-to-square'"></i>
           {{ editMode ? "Cancelar edición" : "Editar información" }}
         </button>
+
+        <div class="more-wrap" @keydown.esc="showMore = false">
+          <button class="more-btn" @click="toggleMore()" :aria-expanded="showMore ? 'true' : 'false'">
+            <i class="fa-solid fa-ellipsis-vertical"></i>
+          </button>
+
+          <transition name="fade">
+            <div v-if="showMore" class="more-menu" @click.stop>
+              <button class="menu-item" @click="handleContactFromMenu()" :disabled="!user?.email">
+                <i class="fa-solid fa-envelope"></i>
+                Contactar
+              </button>
+
+              <button class="menu-item danger" @click="handleDeleteFromMenu()">
+                <i class="fa-solid fa-trash"></i>
+                Eliminar
+              </button>
+            </div>
+          </transition>
+        </div>
       </div>
+
 
       <transition name="fade">
         <div v-if="editMode" class="edit-section">
@@ -89,19 +110,108 @@
     </div>
 
     <p v-else-if="user" class="no-transactions">Este socio aún no tiene transacciones registradas.</p>
+
+    <Teleport to="body">
+      <transition name="fade">
+        <div v-if="showContact" class="modal-overlay" @click.self="closeContact()">
+          <div class="modal-card">
+            <div class="modal-header">
+              <h3><i class="fa-solid fa-paper-plane"></i> Enviar email</h3>
+              <button class="modal-close" @click="closeContact()">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+
+            <div class="modal-body">
+              <div class="modal-to">
+                <span class="to-label">Para:</span>
+                <span class="to-value">{{ user.email }}</span>
+              </div>
+
+              <input v-model="emailForm.subject" class="modal-input" type="text" placeholder="Asunto" />
+
+              <textarea v-model="emailForm.message" class="modal-textarea" rows="7"
+                placeholder="Escribe tu mensaje..."></textarea>
+
+              <p v-if="emailError" class="modal-error">{{ emailError }}</p>
+              <p v-if="emailSuccess" class="modal-success">✓ Email enviado</p>
+            </div>
+
+            <div class="modal-actions">
+              <button class="modal-cancel" @click="closeContact()" :disabled="sendingEmail">
+                Cancelar
+              </button>
+              <button class="modal-send" @click="sendEmailToUser()" :disabled="sendingEmail || !canSendEmail">
+                <i class="fa-solid fa-paper-plane"></i>
+                {{ sendingEmail ? "Enviando..." : "Enviar" }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
+
+      <transition name="fade">
+        <div v-if="showDelete" class="modal-overlay" @click.self="closeDelete()">
+          <div class="modal-card">
+            <div class="modal-header">
+              <h3><i class="fa-solid fa-triangle-exclamation"></i> Eliminar usuario</h3>
+              <button class="modal-close" @click="closeDelete()">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+
+            <div class="modal-body">
+              <p class="delete-text">
+                Vas a eliminar a <strong>{{ user?.nombre }} {{ user?.apellido }}</strong>.
+                Esta acción no se puede deshacer.
+              </p>
+
+              <p v-if="deleteError" class="modal-error">{{ deleteError }}</p>
+            </div>
+
+            <div class="modal-actions">
+              <button class="modal-cancel" @click="closeDelete()" :disabled="deletingUser">
+                Cancelar
+              </button>
+              <button class="modal-danger" @click="deleteUser()" :disabled="deletingUser">
+                <i class="fa-solid fa-trash"></i>
+                {{ deletingUser ? "Eliminando..." : "Eliminar" }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
+    </Teleport>
+
+
   </div>
 </template>
 
 <script>
-/** @type {import('vue').ComponentOptions} */
 import axios from "axios";
 export default {
+  beforeUnmount() {
+    document.removeEventListener("click", this.onGlobalClick, true)
+  },
   data() {
     return {
       user: null,
+      showMore: false,
+      showDelete: false,
+      deletingUser: false,
+      deleteError: "",
       transactions: [],
       usersMap: {},
-      editMode: false
+      editMode: false,
+      showContact: false,
+      sendingEmail: false,
+      emailSuccess: false,
+      emailError: "",
+      emailForm: {
+        to: "",
+        subject: "",
+        message: ""
+      }
     };
   },
   computed: {
@@ -111,6 +221,9 @@ export default {
         .filter(tx => tx.user_id === this.user.id || tx.cliente_id === this.user.id)
         .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
         .slice(0, 10);
+    },
+    canSendEmail() {
+      return !!(this.emailForm.to && this.emailForm.subject.trim() && this.emailForm.message.trim());
     }
   },
   async created() {
@@ -132,8 +245,61 @@ export default {
     this.user = userRes.data;
     this.transactions = salesRes.data;
     this.usersMap = Object.fromEntries(usersRes.data.map(u => [u.id, u]));
+    document.addEventListener("click", this.onGlobalClick, true)
+
+
   },
   methods: {
+    toggleMore() {
+      this.showMore = !this.showMore
+    },
+    closeMore() {
+      this.showMore = false
+    },
+    handleContactFromMenu() {
+      this.closeMore()
+      this.openContact()
+    },
+    handleDeleteFromMenu() {
+      this.closeMore()
+      this.openDelete()
+    },
+    onGlobalClick(e) {
+      if (!this.showMore) return
+      const wrap = this.$el?.querySelector(".more-wrap")
+      if (!wrap) return
+      if (!wrap.contains(e.target)) this.showMore = false
+    },
+
+    openDelete() {
+      this.deleteError = ""
+      this.showDelete = true
+    },
+    closeDelete() {
+      this.showDelete = false
+      this.deletingUser = false
+      this.deleteError = ""
+    },
+    async deleteUser() {
+      try {
+        this.deletingUser = true
+        this.deleteError = ""
+        const token = localStorage.getItem("auth_token")
+
+        await axios.delete(
+          `${import.meta.env.VITE_APP_URL}/api/users/${this.user.id}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        )
+
+        this.showDelete = false
+        this.$router.push("/users")
+      } catch (e) {
+        const data = e?.response?.data
+        this.deleteError = data?.message || (data?.errors ? Object.values(data.errors).flat().join(" ") : "No se pudo eliminar el usuario.")
+      } finally {
+        this.deletingUser = false
+      }
+    },
     getCajeroNombre(id) {
       const u = this.usersMap[id];
       return u ? u.nombre : "Desconocido";
@@ -160,7 +326,53 @@ export default {
     },
     formatMethod(method) {
       return method === "athmovil" ? "ATH Móvil" : "Efectivo";
+    },
+    openContact() {
+      this.emailSuccess = false;
+      this.emailError = "";
+      this.emailForm.to = this.user?.email || "";
+      this.emailForm.subject = `JuCoop - Mensaje para ${this.user?.nombre || ""}`.trim();
+      this.emailForm.message = "";
+      this.showContact = true;
+    },
+    closeContact() {
+      this.showContact = false;
+      this.sendingEmail = false;
+      this.emailError = "";
+    },
+    async sendEmailToUser() {
+      this.emailSuccess = false
+      this.emailError = ""
+
+      if (!this.emailForm.subject.trim() || !this.emailForm.message.trim()) {
+        this.emailError = "Completa asunto y mensaje."
+        return
+      }
+
+      try {
+        this.sendingEmail = true
+        const token = localStorage.getItem("auth_token")
+
+        await axios.post(
+          `${import.meta.env.VITE_APP_URL}/api/send-email`,
+          {
+            user_ids: [this.user.id],
+            subject: this.emailForm.subject,
+            body: this.emailForm.message
+          },
+          { headers: { Authorization: `Bearer ${token}` } }
+        )
+
+        this.emailSuccess = true
+        setTimeout(() => this.closeContact(), 900)
+      } catch (e) {
+        const data = e?.response?.data
+        this.emailError = data?.message || (data?.errors ? Object.values(data.errors).flat().join(" ") : "No se pudo enviar el email.")
+      } finally {
+        this.sendingEmail = false
+      }
     }
+
   }
 };
 </script>
@@ -195,6 +407,54 @@ export default {
   gap: 0.5rem;
   font-weight: 600;
 }
+
+.delete-btn {
+  background: rgba(255, 80, 80, 0.14);
+  border: 1px solid rgba(255, 99, 99, 0.35);
+  color: #ffb0b0;
+  border-radius: 10px;
+  padding: 0.9rem 1.2rem;
+  font-weight: 800;
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  transition: 0.35s;
+  min-width: 180px;
+}
+
+.delete-btn:hover {
+  background: rgba(255, 80, 80, 0.22);
+  transform: translateY(-1px);
+}
+
+.delete-text {
+  margin: 0;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.modal-danger {
+  background: linear-gradient(135deg, #ff6b6b, #ff3b3b);
+  border: none;
+  color: #0f2027;
+  border-radius: 12px;
+  padding: 0.85rem 1.05rem;
+  font-weight: 900;
+  cursor: pointer;
+  transition: 0.25s;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.modal-danger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 
 .back-btn {
   background: rgba(255, 255, 255, 0.12);
@@ -237,6 +497,12 @@ export default {
   gap: 0.4rem;
 }
 
+.info-field span:last-child {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
 .label {
   color: #9dd86a;
   font-weight: 600;
@@ -264,12 +530,115 @@ export default {
   color: #ccc;
 }
 
-.actions {
+.actions-bar {
   margin-top: 1.5rem;
-  display: flex;
-  justify-content: flex-start;
   width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
 }
+
+.primary-btn {
+  flex: 1;
+  background: rgba(157, 216, 106, 0.12);
+  border: 1px solid rgba(157, 216, 106, 0.4);
+  color: #9dd86a;
+  border-radius: 12px;
+  padding: 0.95rem 1.2rem;
+  font-weight: 700;
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  transition: 0.25s;
+  min-height: 48px;
+}
+
+.primary-btn:hover {
+  background: rgba(157, 216, 106, 0.22);
+  transform: translateY(-1px);
+}
+
+.primary-btn.cancelar {
+  background: rgba(255, 80, 80, 0.12);
+  border-color: rgba(255, 99, 99, 0.4);
+  color: #ff8b8b;
+}
+
+.more-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.more-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  transition: 0.25s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.more-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  transform: translateY(-1px);
+}
+
+.more-menu {
+  position: absolute;
+  top: calc(100% + 0.55rem);
+  right: 0;
+  min-width: 210px;
+  background: rgba(15, 32, 39, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(10px);
+  padding: 0.4rem;
+  z-index: 50;
+}
+
+.menu-item {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  color: rgba(255, 255, 255, 0.92);
+  padding: 0.75rem 0.8rem;
+  border-radius: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  font-weight: 700;
+  transition: 0.2s;
+  text-align: left;
+}
+
+.menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.menu-item.danger {
+  color: #ffb0b0;
+}
+
+.menu-item.danger:hover {
+  background: rgba(255, 80, 80, 0.14);
+}
+
 
 .edit-btn {
   background: rgba(157, 216, 106, 0.12);
@@ -297,6 +666,34 @@ export default {
   background: rgba(255, 80, 80, 0.12);
   border-color: rgba(255, 99, 99, 0.4);
   color: #ff8b8b;
+}
+
+.contact-btn {
+  background: rgba(0, 188, 212, 0.14);
+  border: 1px solid rgba(0, 188, 212, 0.35);
+  color: #b6f7ff;
+  border-radius: 10px;
+  padding: 0.9rem 1.2rem;
+  font-weight: 700;
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  transition: 0.35s;
+  min-width: 180px;
+}
+
+.contact-btn:hover {
+  background: rgba(0, 188, 212, 0.24);
+  transform: translateY(-1px);
+}
+
+.contact-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .save-btn {
@@ -387,11 +784,11 @@ export default {
   border-radius: 50%;
 }
 
-input:checked + .slider {
+input:checked+.slider {
   background-color: #9dd86a;
 }
 
-input:checked + .slider:before {
+input:checked+.slider:before {
   transform: translateX(22px);
 }
 
@@ -444,6 +841,179 @@ input:checked + .slider:before {
   color: #4caf50;
 }
 
+.no-transactions {
+  opacity: 0.85;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  z-index: 999999;
+}
+
+.modal-card {
+  width: 100%;
+  max-width: 620px;
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  background: rgba(15, 32, 39, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 16px;
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(10px);
+  font-family: "Inter", sans-serif;
+}
+
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.modal-header h3 {
+  margin: 0;
+  color: #9dd86a;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.modal-close {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+  font-size: 1.1rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 10px;
+  transition: 0.2s;
+}
+
+.modal-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.modal-body {
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.modal-to {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  padding: 0.7rem 0.85rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+}
+
+.to-label {
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 600;
+}
+
+.to-value {
+  color: #fff;
+  font-weight: 700;
+}
+
+.modal-input,
+.modal-textarea {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  padding: 0.85rem 0.95rem;
+  font-size: 1rem;
+  outline: none;
+}
+
+.modal-textarea {
+  resize: vertical;
+  min-height: 140px;
+}
+
+.modal-error {
+  margin: 0;
+  color: #ff8b8b;
+  font-weight: 600;
+}
+
+.modal-success {
+  margin: 0;
+  color: #9dd86a;
+  font-weight: 700;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  padding: 1rem 1.1rem 1.1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.modal-cancel {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #fff;
+  border-radius: 12px;
+  padding: 0.85rem 1.05rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: 0.25s;
+}
+
+.modal-cancel:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.modal-send {
+  background: linear-gradient(135deg, #9dd86a, #7ac75d);
+  border: none;
+  color: #0f2027;
+  border-radius: 12px;
+  padding: 0.85rem 1.05rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: 0.25s;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.modal-send:disabled,
+.modal-cancel:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 @media (min-width: 768px) {
   .header {
     flex-direction: row;
@@ -463,6 +1033,28 @@ input:checked + .slider:before {
   .user-card,
   .transactions-card {
     padding: 2rem;
+  }
+}
+
+@media (max-width: 420px) {
+  .more-menu {
+    right: 0;
+    left: 0;
+    min-width: unset;
+  }
+}
+
+@media (max-width: 520px) {
+  .transaction-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .tx-right {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
   }
 }
 </style>

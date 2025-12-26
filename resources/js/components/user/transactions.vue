@@ -3,8 +3,6 @@
     <!-- 🔝 Header -->
     <div class="header">
       <h2><i class="fa-solid fa-scroll"></i> Mis Transacciones</h2>
-      <button @click="$router.push('/dashboard')" class="back-btn">
-      </button>
     </div>
 
     <div class="table-wrapper" v-if="transactions.length">

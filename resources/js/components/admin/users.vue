@@ -52,9 +52,6 @@
           <button class="manage-btn" @click="goToUser(user.id)">
             <i class="fa-solid fa-gear"></i> Administrar
           </button>
-          <button class="delete-btn" @click="deleteUser(user.id)">
-            <i class="fa-solid fa-trash"></i> Eliminar
-          </button>
         </div>
       </div>
     </div>
